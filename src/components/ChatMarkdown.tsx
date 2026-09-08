@@ -142,7 +142,11 @@ export function CodeBlock({ code, lang, streaming }: CodeBlockProps) {
         .then((shiki) =>
           shiki.codeToHtml(code, {
             lang: lang || "text",
-            theme: "github-dark-default",
+            themes: {
+              light: "github-light-default",
+              dark: "github-dark-default",
+            },
+            defaultColor: "light-dark()",
           }),
         )
         .then((out) => {
