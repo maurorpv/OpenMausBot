@@ -5,6 +5,8 @@
 // Stream. The shapes and names are kept so the two codebases stay mutually
 // readable.
 
+import type { ApprovalMode } from "../shared/approval-mode.ts";
+
 export type DriverKind = string;
 export type InstanceId = string;
 export type ThreadId = string;
@@ -132,6 +134,9 @@ export type RuntimeEvent = RuntimeEventBase &
         summary: string;
         choices?: string[];
         approvalScope?: "local-computer";
+        /** Provider asks to widen its configured sandbox. Only explicit Full
+         * access may answer this automatically; Auto/remembered grants may not. */
+        requiresExplicitApproval?: boolean;
       }
     | {
         type: "request.resolved";
@@ -164,6 +169,9 @@ export type RequestOutcome = "allowed-once" | "rejected" | "answered" | "unavail
 export interface SendTurnInput {
   threadId: ThreadId;
   text: string;
+  /** Per-bot approval policy, reasserted by providers on every turn so a
+   * resumed native session cannot retain a stale, more permissive mode. */
+  approvalMode?: ApprovalMode;
   /** Images attached to this user turn only. They are deliberately kept out
    * of replay transcripts: the provider's native session owns earlier image
    * context, while a fresh replay retains the visible attachment marker. */
@@ -303,6 +311,8 @@ export interface ProviderSnapshot {
   state: "available" | "unavailable";
   reason?: string;
   authenticated?: boolean;
+  /** Vetted display identity from the provider CLI, never credentials. */
+  account?: { email?: string; organization?: string };
   version?: string | null;
   /** A non-blocking provider update that unlocks newer capabilities. The
    * engine remains usable; renderer surfaces the exact terminal command. */
@@ -348,6 +358,14 @@ export interface ProviderAuthenticationStart {
   flowId: string | null;
   authorizationUrl: string | null;
   expiresAt: string | null;
+  /** A short-lived code to enter only at the provider's authorization URL. */
+  userCode?: string;
+}
+
+export interface ProviderAuthenticationStatus extends Omit<ProviderAuthenticationStart, "phase"> {
+  phase: "waiting" | "succeeded" | "failed" | "expired" | "cancelled";
+  /** Safe, actionable copy; never unfiltered CLI output or credentials. */
+  message?: string;
 }
 
 // ── driver SPI (upstream ProviderDriver — a plain record, not a service) ─
@@ -391,6 +409,7 @@ export interface ProviderInstance {
   /** Optional first-party runtime installation and account setup. */
   readonly installRuntime?: () => Promise<void>;
   readonly startAuthentication?: () => Promise<ProviderAuthenticationStart>;
+  readonly getAuthentication?: (flowId: string) => Promise<ProviderAuthenticationStatus>;
   readonly completeAuthentication?: (flowId: string, callbackUrl: string) => Promise<void>;
   readonly cancelAuthentication?: () => Promise<void>;
   readonly adapter: ProviderAdapter;

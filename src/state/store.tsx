@@ -16,7 +16,9 @@ import {
 import type { CloudBackend, EffortLevel } from "../../server/contracts.ts";
 import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
+import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
 import type { MascotBodyId } from "../../shared/mascot-bodies";
+import type { ProfileRequestCardData } from "../../shared/profile-request";
 import type { RoutineRequestCardData } from "../../shared/routine-request";
 import type { RoutineRunCardData } from "../../shared/routine-run";
 import type { GroupGoalRunCardData } from "../../shared/group-goal-run";
@@ -68,6 +70,9 @@ export interface OptionCardData {
   tool?: string;
   /** why auto mode stopped to ask anyway */
   held?: string;
+  /** catalog key for `held` when it is a fixed note, so it reads in the
+   * viewer's language; absent for free-text errors and older cards */
+  heldCode?: string;
   /** the narrow grant "always allow" remembers, e.g. "Bash:git" */
   allowKey?: string;
   approvalScope?: "local-computer";
@@ -75,6 +80,8 @@ export interface OptionCardData {
   routineRequest?: RoutineRequestCardData;
   /** Staged learned-skill change; applied only after the user confirms this card. */
   skillRequest?: SkillRequestCardData;
+  /** Persisted profile proposal used by the server when the user confirms it. */
+  profileRequest?: ProfileRequestCardData;
 }
 
 export interface ConnectorCardData {
@@ -83,6 +90,7 @@ export interface ConnectorCardData {
   description: string;
   status: "required" | "authorizing" | "connected" | "failed";
   resumeKey: string;
+  alias?: string;
   error?: string;
   dismissed?: boolean;
   resumed?: boolean;
@@ -123,6 +131,8 @@ export interface Message {
   tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean };
   /** user messages sent into a running turn — the model saw it mid-turn */
   steered?: boolean;
+  /** a user message that arrived through the server's API, not typed here */
+  via?: "api";
   /** Provider turn that produced this message. */
   turnId?: string;
   /** Last assistant text item from a settled provider turn. */
@@ -241,6 +251,10 @@ export interface Bot {
   name: string;
   title: string;
   description: string;
+  /** Standing instructions (SOUL.md). Canonical on the server; the file is a mirror. */
+  soul?: string;
+  /** The SOUL.md mirror on disk differs from the record; the Soul editor offers apply/discard. */
+  soulDrift?: boolean;
   notifications: boolean;
   color: MausColor;
   mascotExpression?: string | null;
@@ -266,6 +280,8 @@ export interface Bot {
   cwd?: string;
   /** auto mode: the bot approves its own tool permissions */
   autoApprove?: boolean;
+  /** Explicit approval level; absent records use the legacy autoApprove bit. */
+  approvalMode?: ApprovalMode;
   /** optional model review for otherwise undecided, attended approvals */
   autoReview?: "off" | "shadow" | "enforce";
   /** tools this bot may always use without asking */
@@ -285,6 +301,10 @@ export interface Bot {
   /** When this bot wants to talk to another bot (ask_bot/delegate_bot),
    * pause and ask the user first. Off by default. */
   approvePeerComms?: boolean;
+  /** Explicit peer allow-list (bot ids); absent = every bot in its section,
+   * `[]` = none. Read-only on the web today; here so the settings dialog can
+   * refetch the overview when the server changes it. */
+  peers?: string[];
   /** Whether this bot may use the workspace's connected apps. Unset means
    * allowed for existing bots; imported bots start with this disabled. */
   composio?: boolean;
@@ -346,8 +366,20 @@ export interface ConfigStatus {
   language?: string;
   /** Opt-in flags. Absent means off. */
   features?: { skillRecorder: boolean; showToolCalls?: boolean; browser?: boolean };
+  /** Which browser this server can give bots: the desktop app's surface, the
+   * agent-browser engine, or nothing yet (with the reason). */
+  browserEngine?: BrowserEngineSummary;
   /** Named browser sessions any bot can be pointed at. */
   browserProfiles?: BrowserProfile[];
+}
+
+export interface BrowserEngineSummary {
+  kind: "engine" | "unavailable";
+  reason?: string;
+  installable?: boolean;
+  version?: string;
+  installing?: boolean;
+  installError?: string;
 }
 
 export interface BrowserProfile {
@@ -360,7 +392,7 @@ export interface BrowserProfile {
 
 export type ConfigStatusFrame = Pick<
   ConfigStatus,
-  "xai" | "composio" | "box" | "vps" | "rooms" | "localVm" | "opencodeGo" | "tts" | "imageGen" | "profile" | "language" | "features" | "browserProfiles"
+  "xai" | "composio" | "box" | "vps" | "rooms" | "localVm" | "opencodeGo" | "tts" | "imageGen" | "profile" | "language" | "features" | "browserEngine" | "browserProfiles"
 >;
 
 export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
@@ -377,6 +409,7 @@ export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
     profile: frame.profile,
     language: frame.language,
     features: frame.features,
+    browserEngine: frame.browserEngine,
     browserProfiles: frame.browserProfiles,
   };
 }
@@ -401,6 +434,7 @@ export interface InstanceInfo {
     state: "available" | "unavailable";
     reason?: string;
     authenticated?: boolean;
+    account?: { email?: string; organization?: string };
     version?: string | null;
     /** A newer provider version unlocks capabilities, but this installed
      * version and its current models remain usable. */
@@ -429,6 +463,7 @@ export interface InstanceInfo {
   };
   /** `custom` agents sit below the rail divider — no subscription catalog. */
   access?: "subscription" | "custom";
+  authentication?: { method: "device-code" | "browser" };
   install?: EngineInstall;
   /** Configured CLI path override — set ONLY when the user overrode it;
    * absent means the driver default is in effect. */
@@ -437,6 +472,8 @@ export interface InstanceInfo {
   cliDefault?: string;
   /** Absolute paths of every default binary found on PATH, PATH order. */
   cliCandidates?: string[];
+  /** Server-owned Claude profile; a saved directory does not prove sign-in. */
+  claudeAccount?: { configDir: string; signInCommand: string; signInShell: "powershell" | "sh"; isDefault: boolean };
 }
 
 export type AppSettingsSection =
@@ -445,7 +482,22 @@ export type AppSettingsSection =
   | "connections"
   | "engines"
   | "companion"
+  | "remote"
   | "computer"
+  | "usage";
+
+export type BotSettingsSection =
+  | "overview"
+  | "identity"
+  | "soul"
+  | "skills"
+  | "memory"
+  | "routines"
+  | "access"
+  | "model"
+  | "permissions"
+  | "voice"
+  | "history"
   | "usage";
 
 export interface AppState {
@@ -469,6 +521,7 @@ export interface AppState {
   appSettingsOpen: boolean;
   appSettingsSection: AppSettingsSection;
   shortcutsOpen: boolean;
+  botSettingsSection: BotSettingsSection;
   /** latest live frame of a bot's computer, per botId */
   screens: Record<string, { png: string; mime: string }>;
   /** bots whose cloud computer is being provisioned */
@@ -571,7 +624,7 @@ export type Action =
   | { type: "createRoutine"; input: RoutineInput }
   | { type: "updateRoutine"; routineId: string; patch: Partial<RoutineInput> }
   | { type: "deleteRoutine"; routineId: string }
-  | { type: "runRoutine"; routineId: string }
+  | { type: "runRoutine"; routineId: string; onSettled?: () => void }
   | { type: "cancelRoutineRun"; runId: string }
   | { type: "markRoutineRunSeen"; runId: string }
   | { type: "groupPatched"; group: Partial<Group> & { id: string } }
@@ -656,7 +709,7 @@ export type Action =
   | { type: "interrupt"; botId: string; threadId?: string; onError?: () => void }
   | { type: "connected"; value: boolean }
   | { type: "error"; message: string | null }
-  | { type: "toggleSettings"; open?: boolean }
+  | { type: "toggleSettings"; open?: boolean; section?: BotSettingsSection }
   | { type: "togglePlugins"; open?: boolean }
   | { type: "toggleComputer"; open?: boolean }
   | { type: "toggleInspector"; open?: boolean }
@@ -910,11 +963,21 @@ export function reducer(state: AppState, action: Action): AppState {
           ...state,
           activeView: "chat",
           selectedId: action.id,
+          botSettingsSection: action.id !== state.selectedId ? "overview" : state.botSettingsSection,
           groups: state.groups.map((g) => (g.id === action.id ? { ...g, unread: false } : g)),
         };
       }
       return updateBot(
-        withMascotMotion({ ...state, activeView: "chat", selectedId: action.id }, action.id, "switch"),
+        withMascotMotion(
+          {
+            ...state,
+            activeView: "chat",
+            selectedId: action.id,
+            botSettingsSection: action.id !== state.selectedId ? "overview" : state.botSettingsSection,
+          },
+          action.id,
+          "switch",
+        ),
         action.id,
         (b) => ({ ...b, unread: false }),
       );
@@ -1001,6 +1064,10 @@ export function reducer(state: AppState, action: Action): AppState {
       const patched = updateBot(next, action.bot.id, (b) => ({
         ...b,
         ...action.bot,
+        // Complete bot frames omit this optional field after switching back
+        // to Own browser (or deleting a shared profile). Do not retain the
+        // previous profile's name and selection in another window.
+        browserProfile: action.bot.browserProfile,
         // Ordinary bot patches omit messages and must preserve the current
         // transcript. A task switch is different: its full bot event carries
         // the new transcript, which must replace the previous task before the
@@ -1188,8 +1255,12 @@ export function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         settingsOpen: open,
-        computerOpen: open ? false : state.computerOpen,
-        inspectorOpen: open ? false : state.inspectorOpen,
+        botSettingsSection: action.section ?? state.botSettingsSection,
+        // A centered modal sits over the side panels, so opening it leaves
+        // the computer panel and inspector as they were — the computer
+        // panel's own gear opens this dialog, and closing the panel under it
+        // would destroy what the user was just looking at. The app settings
+        // modal is the one thing that cannot share the screen with it.
         appSettingsOpen: open ? false : state.appSettingsOpen,
       };
     }
@@ -1266,7 +1337,12 @@ export function reducer(state: AppState, action: Action): AppState {
             ),
           }
         : animated;
-      const { acknowledgeLocalAuto: _ack, computer, ...rest } = action.patch;
+      const {
+        acknowledgeLocalAuto: _localAck,
+        confirmFullAccess: _fullConfirmation,
+        computer,
+        ...rest
+      } = action.patch;
       const botPatch = computer === null
         ? { ...rest, computer: undefined }
         : computer === undefined
@@ -1471,6 +1547,7 @@ export const initialState: AppState = {
   appSettingsOpen: false,
   appSettingsSection: "general",
   shortcutsOpen: false,
+  botSettingsSection: "overview",
   screens: {},
   provisioning: {},
   deletingBots: {},
@@ -1484,14 +1561,130 @@ export const initialState: AppState = {
 };
 
 // ── API client ─────────────────────────────────────────────────────────
+export class ApiError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 export async function api(path: string, init?: RequestInit): Promise<any> {
   const res = await fetch(path, {
     headers: { "content-type": "application/json" },
     ...init,
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error ?? `${res.status} ${res.statusText}`);
+  if (!res.ok) throw new ApiError(body.error ?? `${res.status} ${res.statusText}`, res.status);
   return body;
+}
+
+type TrustedApprovalBridge = {
+  setMode(
+    botId: string,
+    mode: ApprovalMode,
+    options?: { acknowledgeLocalAuto?: boolean },
+  ): Promise<BotAnnouncement>;
+};
+
+/** Persist one coalesced bot edit without ever putting Full/Custom authority
+ * on the bot-accessible HTTP surface. Entering a trusted mode writes ordinary
+ * fields first, then grants authority. Leaving Custom reverses that order so a
+ * coalesced provider switch is validated after the bot is back in Ask/Auto.
+ * Exported for a small ordering/security contract test. */
+export async function persistBotUpdate(
+  botId: string,
+  patch: BotUpdatePatch,
+  signal: AbortSignal,
+  request: (path: string, init?: RequestInit) => Promise<{ bot: BotAnnouncement }> = api,
+  trustedApprovals: TrustedApprovalBridge | undefined =
+    typeof window === "undefined" ? undefined : window.ogb?.approvals,
+  currentBot?: BotAnnouncement,
+): Promise<BotAnnouncement> {
+  const {
+    approvalMode,
+    confirmFullAccess,
+    ...ordinaryPatch
+  } = patch;
+  const trustedMode = approvalMode === "full" || approvalMode === "custom"
+    ? approvalMode
+    : null;
+  const leavesCustom = approvalMode !== undefined &&
+    approvalModeFor(currentBot ?? {}) === "custom" &&
+    approvalMode !== "custom";
+
+  if (!trustedMode && !leavesCustom) {
+    const result = await request(`/api/bots/${botId}`, {
+      method: "PATCH",
+      // The Full confirmation is renderer-local and has already been removed
+      // above, including when a rapid later Ask/Auto choice was coalesced.
+      body: JSON.stringify(
+        approvalMode === undefined ? ordinaryPatch : { ...ordinaryPatch, approvalMode },
+      ),
+      signal,
+    });
+    return result.bot;
+  }
+
+  if (approvalMode === "full" && confirmFullAccess !== true) {
+    throw new Error("Confirm the Full access warning before enabling it");
+  }
+  if (!trustedApprovals || approvalMode === undefined) {
+    throw new Error("This approval-level change requires the packaged desktop app");
+  }
+
+  const trustedOptions = {
+    acknowledgeLocalAuto: ordinaryPatch.acknowledgeLocalAuto === true,
+  };
+
+  const rejectCancelledTrustedGrant = async () => {
+    if (!signal.aborted) return;
+    // IPC cannot cancel a grant that already reached the embedded server. If
+    // a newer selection or an unmount aborted this operation while
+    // Full/Custom was in flight, revoke it through the same private channel
+    // before reporting cancellation. The server permits this one fail-closed
+    // downgrade even if a turn happened to start in the response gap.
+    if (approvalMode === "full" || approvalMode === "custom") {
+      try {
+        await trustedApprovals.setMode(botId, "ask", { acknowledgeLocalAuto: false });
+      } catch (error) {
+        throw new Error(
+          `The cancelled ${approvalMode === "full" ? "Full access" : "Custom approval"} grant could not be revoked: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+    throw new DOMException("The bot update was cancelled", "AbortError");
+  };
+
+  if (leavesCustom) {
+    const modeBot = await trustedApprovals.setMode(botId, approvalMode, trustedOptions);
+    await rejectCancelledTrustedGrant();
+    if (Object.keys(ordinaryPatch).length === 0) return modeBot;
+    const result = await request(`/api/bots/${botId}`, {
+      method: "PATCH",
+      body: JSON.stringify(ordinaryPatch),
+      signal,
+    });
+    return result.bot;
+  }
+
+  if (Object.keys(ordinaryPatch).length > 0) {
+    await request(`/api/bots/${botId}`, {
+      method: "PATCH",
+      // Local-computer + Auto consent remains relevant when the approval
+      // transition itself uses the private channel (for example, a coalesced
+      // Auto -> Full edit). The HTTP computer update must retain that proof.
+      body: JSON.stringify(ordinaryPatch),
+      signal,
+    });
+  }
+  if (signal.aborted) throw new DOMException("The bot update was cancelled", "AbortError");
+  const modeBot = await trustedApprovals.setMode(botId, approvalMode, trustedOptions);
+  await rejectCancelledTrustedGrant();
+  return modeBot;
 }
 
 /** Bot removal is intentionally non-optimistic. The server may require the
@@ -1624,14 +1817,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const botPatchQueue = useMemo(
     () =>
       createBotPatchQueue({
-        send: async (botId, patch, signal) => {
-          const result: { bot: BotAnnouncement } = await api(`/api/bots/${botId}`, {
-            method: "PATCH",
-            body: JSON.stringify(patch),
-            signal,
-          });
-          return result.bot;
-        },
+        send: (botId, patch, signal, currentBot) =>
+          persistBotUpdate(botId, patch, signal, api, window.ogb?.approvals, currentBot),
         reconcile: async (botId, signal) => {
           const result: { bots: BotAnnouncement[] } = await api("/api/bots", { signal });
           return result.bots.find((candidate) => candidate.id === botId) ?? null;
@@ -1668,6 +1855,43 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }).catch(() => {});
     };
 
+    const waitForExecutionSettings = async (expectedBots: Bot[]) => {
+      await Promise.all(expectedBots.map(async (expected) => {
+        const persisted = await botPatchQueue.flush(expected.id);
+        if (!persisted) return;
+        const expectedSelection = expected.modelSelection;
+        if (
+          approvalModeFor(persisted) !== approvalModeFor(expected) ||
+          persisted.modelSelection.instanceId !== expectedSelection.instanceId ||
+          persisted.modelSelection.model !== expectedSelection.model ||
+          persisted.modelSelection.effort !== expectedSelection.effort
+        ) {
+          throw new Error("The approval level or model could not be saved, so this work was not started");
+        }
+      }));
+    };
+
+    /** Resolve every bot whose execution context belongs to this thread. A
+     * direct chat may name an inactive task, while a channel request belongs
+     * to every member that could be selected to run it. Capture the result
+     * before the optimistic reducer runs so approval/model writes cannot race
+     * a response that resumes (or starts) work. */
+    const executionBotsForThread = (threadId: string): Bot[] => {
+      const snapshot = stateRef.current;
+      const botIds = new Set<string>();
+      for (const bot of snapshot.bots) {
+        if (bot.threadId === threadId || bot.tasks?.some((task) => task.threadId === threadId)) {
+          botIds.add(bot.id);
+        }
+      }
+      for (const group of snapshot.groups) {
+        if (group.threadId === threadId || group.tasks?.some((task) => task.threadId === threadId)) {
+          for (const memberId of group.memberIds) botIds.add(memberId);
+        }
+      }
+      return snapshot.bots.filter((bot) => botIds.has(bot.id));
+    };
+
     const wrapped: React.Dispatch<Action> = (action) => {
       // One identity drives the optimistic row, HTTP retry protection, and
       // canonical SSE reconciliation. Callers may omit it; the store may not.
@@ -1675,13 +1899,45 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         action = { ...action, sendId: crypto.randomUUID() };
       }
       const botBeforeUpdate =
-        action.type === "updateBot"
+        action.type === "updateBot" || action.type === "setModel"
           ? stateRef.current.bots.find((candidate) => candidate.id === action.botId)
           : undefined;
+      const botBeforeSend =
+        action.type === "send"
+          ? stateRef.current.bots.find((candidate) => candidate.id === action.botId)
+          : undefined;
+      const executionBotsBeforeAction = (() => {
+        if (action.type === "editMessage" || action.type === "answerCard") {
+          const bot = stateRef.current.bots.find((candidate) => candidate.id === action.botId);
+          return bot ? [bot] : [];
+        }
+        if (action.type === "decideRequest") {
+          const bots = executionBotsForThread(action.threadId);
+          if (!action.alwaysAllow || bots.some((bot) => bot.id === action.alwaysAllow?.botId)) {
+            return bots;
+          }
+          const grantBot = stateRef.current.bots.find((bot) => bot.id === action.alwaysAllow?.botId);
+          return grantBot ? [...bots, grantBot] : bots;
+        }
+        if (action.type === "sendGroup") {
+          const memberIds = stateRef.current.groups.find((group) => group.id === action.groupId)?.memberIds ?? [];
+          return stateRef.current.bots.filter((candidate) => memberIds.includes(candidate.id));
+        }
+        if (action.type === "runRoutine") {
+          const routine = stateRef.current.routines.find((candidate) => candidate.id === action.routineId);
+          if (!routine) return [];
+          const ids = new Set([routine.botId]);
+          if (routine.target === "room-goal" && routine.groupId) {
+            const group = stateRef.current.groups.find((candidate) => candidate.id === routine.groupId);
+            for (const memberId of group?.memberIds ?? []) ids.add(memberId);
+          }
+          return stateRef.current.bots.filter((candidate) => ids.has(candidate.id));
+        }
+        return [];
+      })();
       const quizBeforeSend = (() => {
         if (action.type !== "send") return undefined;
-        const bot = stateRef.current.bots.find((candidate) => candidate.id === action.botId);
-        return bot ? openOnboardingCard(bot) : undefined;
+        return botBeforeSend ? openOnboardingCard(botBeforeSend) : undefined;
       })();
       // A queued message is still real until the server confirms deletion.
       // Bot deletion is also server-authoritative: lifecycle guards may reject
@@ -1706,7 +1962,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           api(`/api/routines/${action.routineId}`, { method: "DELETE" }).catch(showError);
           break;
         case "runRoutine":
-          api(`/api/routines/${action.routineId}/run`, { method: "POST" }).catch(showError);
+          void waitForExecutionSettings(executionBotsBeforeAction)
+            .then(() => api(`/api/routines/${action.routineId}/run`, { method: "POST" }))
+            .catch(showError)
+            .finally(() => action.onSettled?.());
           break;
         case "cancelRoutineRun":
           api(`/api/routine-runs/${action.runId}/cancel`, { method: "POST" }).catch(showError);
@@ -1731,10 +1990,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const threadId =
             action.threadId ?? stateRef.current.bots.find((bot) => bot.id === action.botId)?.threadId;
           const sendId = action.sendId ?? crypto.randomUUID();
-          void api(`/api/bots/${action.botId}/messages`, {
-            method: "POST",
-            body: JSON.stringify({ text: action.text, replyToId: action.replyToId, threadId, sendId }),
-          })
+          void waitForExecutionSettings(botBeforeSend ? [botBeforeSend] : [])
+            .then(() => api(`/api/bots/${action.botId}/messages`, {
+                method: "POST",
+                body: JSON.stringify({ text: action.text, replyToId: action.replyToId, threadId, sendId }),
+              }))
             .then((body) => {
               if (body?.message && typeof body.threadId === "string") {
                 rawDispatch({ type: "messageAdded", threadId: body.threadId, message: body.message });
@@ -1767,10 +2027,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         }
         case "editMessage":
-          api(`/api/bots/${action.botId}/messages/${action.messageId}/edit`, {
-            method: "POST",
-            body: JSON.stringify({ text: action.text }),
-          }).catch(showError);
+          void waitForExecutionSettings(executionBotsBeforeAction)
+            .then(() => api(`/api/bots/${action.botId}/messages/${action.messageId}/edit`, {
+              method: "POST",
+              body: JSON.stringify({ text: action.text }),
+            }))
+            .catch(showError);
           break;
         case "switchBranch":
           api(`/api/bots/${action.botId}/active-branch`, {
@@ -1788,54 +2050,65 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 message: action.message,
                 reviewedSha256: action.reviewedSha256,
               }),
-            }).catch((error) => {
+            });
+          void waitForExecutionSettings(executionBotsBeforeAction)
+            .then(async () => {
+              if (action.alwaysAllow) {
+                const bot = stateRef.current.bots.find((candidate) => candidate.id === action.alwaysAllow?.botId);
+                const next = [...new Set([...(bot?.alwaysAllow ?? []), action.alwaysAllow.key])];
+                // Save the grant BEFORE releasing the bot: it may ask again
+                // within milliseconds. A failed preference save must still
+                // let this one response through, but the person should see it.
+                try {
+                  await api(`/api/bots/${action.alwaysAllow.botId}`, {
+                    method: "PATCH",
+                    body: JSON.stringify({ alwaysAllow: next }),
+                  });
+                } catch (error) {
+                  showError(error);
+                }
+              }
+              const response = await respond();
+              if (response?.settlementPending && typeof response.message === "string") {
+                showError(new Error(response.message));
+              }
+            })
+            .catch((error) => {
+              // A settings flush failure deliberately stops the response;
+              // otherwise it could resume work under a stale approval level.
               showError(error);
               action.onError?.(error instanceof Error ? error.message : String(error));
             });
-          if (action.alwaysAllow) {
-            const bot = stateRef.current.bots.find((b) => b.id === action.alwaysAllow!.botId);
-            const next = [...new Set([...(bot?.alwaysAllow ?? []), action.alwaysAllow.key])];
-            // save the grant BEFORE releasing the bot: it may ask again
-            // within milliseconds, and a grant that hasn't landed yet
-            // would make "always allow" ask a second time. A failed save
-            // still lets this one through — losing a preference must not
-            // strand the turn — but it says so.
-            void api(`/api/bots/${action.alwaysAllow.botId}`, {
-              method: "PATCH",
-              body: JSON.stringify({ alwaysAllow: next }),
-            })
-              .catch(showError)
-              .finally(respond);
-            break;
-          }
-          void respond();
           break;
         }
         case "answerCard": {
           const bot = stateRef.current.bots.find((b) => b.id === action.botId);
           const card = bot?.messages.find((m) => m.id === action.messageId)?.card;
-          if (card?.requestId) {
-            const behavior = card.skillRequest
-              ? skillRequestBehavior(action.answer)
-              : action.answer === "Allow" ? "allow" : action.answer === "Deny" ? "deny" : "answer";
-            api(`/api/bots/${action.botId}/respond`, {
-              method: "POST",
-              body: JSON.stringify({
-                requestId: card.requestId,
-                behavior,
-                message: behavior === "answer" ? action.answer : undefined,
-                reviewedSha256: behavior === "allow" && card.skillRequest
-                  ? reviewedSkillSha256(card.skillRequest)
-                  : undefined,
-              }),
-            }).catch(showError);
-          } else {
-            persistCard(action.botId, action.messageId, { answered: action.answer, dismissed: true });
-            api(`/api/bots/${action.botId}/messages`, {
-              method: "POST",
-              body: JSON.stringify({ text: action.answer }),
-            }).catch(showError);
-          }
+          void waitForExecutionSettings(executionBotsBeforeAction)
+            .then(() => {
+              if (card?.requestId) {
+                const behavior = card.skillRequest
+                  ? skillRequestBehavior(action.answer)
+                  : action.answer === "Allow" ? "allow" : action.answer === "Deny" ? "deny" : "answer";
+                return api(`/api/bots/${action.botId}/respond`, {
+                  method: "POST",
+                  body: JSON.stringify({
+                    requestId: card.requestId,
+                    behavior,
+                    message: behavior === "answer" ? action.answer : undefined,
+                    reviewedSha256: behavior === "allow" && card.skillRequest
+                      ? reviewedSkillSha256(card.skillRequest)
+                      : undefined,
+                  }),
+                });
+              }
+              persistCard(action.botId, action.messageId, { answered: action.answer, dismissed: true });
+              return api(`/api/bots/${action.botId}/messages`, {
+                method: "POST",
+                body: JSON.stringify({ text: action.answer }),
+              });
+            })
+            .catch(showError);
           break;
         }
         case "dismissCard": {
@@ -1863,6 +2136,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             name: `${source.name} copy`,
             title: source.title,
             description: source.description,
+            soul: source.soul,
             notifications: source.notifications,
             modelSelection: source.modelSelection,
             computer: source.computer,
@@ -1913,16 +2187,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const bot = stateRef.current.bots.find((b) => b.id === action.id);
           const group = stateRef.current.groups.find((g) => g.id === action.id);
           if (bot?.unread) {
-            api(`/api/bots/${action.id}`, { method: "PATCH", body: JSON.stringify({ unread: false }) }).catch(() => {});
+            api(`/api/bots/${action.id}/read`, { method: "POST" }).catch(() => {});
           } else if (group?.unread) {
-            api(`/api/groups/${action.id}`, { method: "PATCH", body: JSON.stringify({ unread: false }) }).catch(() => {});
+            api(`/api/groups/${action.id}/read`, { method: "POST" }).catch(() => {});
           }
           break;
         }
         case "createGroup":
           api(`/api/groups`, {
             method: "POST",
-            body: JSON.stringify({ memberIds: action.memberIds, name: action.name, section: action.section }),
+            body: JSON.stringify({
+              memberIds: action.memberIds,
+              name: action.name,
+              section: action.section,
+              ...(window.ogb?.remoteClient?.active
+                ? { setup: { bulletin: "", defaultResponder: { kind: "mentions" } } }
+                : {}),
+            }),
           })
             .then(({ group }) => {
               rawDispatch({ type: "groupPatched", group });
@@ -1934,16 +2215,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const threadId =
             action.threadId ?? stateRef.current.groups.find((group) => group.id === action.groupId)?.threadId;
           const sendId = action.sendId ?? crypto.randomUUID();
-          api(`/api/groups/${action.groupId}/messages`, {
-            method: "POST",
-            body: JSON.stringify({
-              text: action.text,
-              replyToId: action.replyToId,
-              threadId,
-              sendId,
-              mode: action.mode ?? "chat",
-            }),
-          })
+          void waitForExecutionSettings(executionBotsBeforeAction)
+            .then(() => api(`/api/groups/${action.groupId}/messages`, {
+              method: "POST",
+              body: JSON.stringify({
+                text: action.text,
+                replyToId: action.replyToId,
+                threadId,
+                sendId,
+                mode: action.mode ?? "chat",
+              }),
+            }))
             .then((body) => {
               if (body?.message && typeof body.threadId === "string") {
                 rawDispatch({ type: "messageAdded", threadId: body.threadId, message: body.message });
@@ -1985,10 +2267,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           api(`/api/groups/${action.groupId}`, { method: "DELETE" }).catch(showError);
           break;
         case "setModel":
-          api(`/api/bots/${action.botId}`, {
-            method: "PATCH",
-            body: JSON.stringify({ modelSelection: action.selection }),
-          }).catch(showError);
+          if (botBeforeUpdate) {
+            botPatchQueue.enqueue(
+              action.botId,
+              { modelSelection: action.selection },
+              botBeforeUpdate,
+            );
+          }
           break;
         case "interrupt":
           api(`/api/bots/${action.botId}/interrupt`, {
@@ -2112,14 +2397,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           return () => rawDispatch({ type: "routinesHydrated", routines, runs });
         },
       },
-      {
+      ...(window.ogb?.remoteClient?.active ? [] : [{
         key: "webhooks",
         request: async () => {
           const { webhooks, attempts, ingress } = await api("/api/webhooks");
           return () =>
             rawDispatch({ type: "webhooksHydrated", webhooks, attempts: attempts ?? [], ingress });
         },
-      },
+      } satisfies PeripheralPart]),
     ];
     const partByKey = new Map(peripheralParts.map((part) => [part.key, part]));
     const schedulePeripheralRetry = (part: PeripheralPart, error?: Error) => {
@@ -2282,11 +2567,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           // reading the selected chat clears its badge immediately
           if (bot.unread && bot.id === stateRef.current.selectedId) {
             bot.unread = false;
-            fetch(`/api/bots/${bot.id}`, {
-              method: "PATCH",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ unread: false }),
-            }).catch(() => {});
+            fetch(`/api/bots/${bot.id}/read`, { method: "POST" }).catch(() => {});
           }
           rawDispatch({
             type: "botPatched",
@@ -2299,11 +2580,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           // reading the selected room clears its badge immediately
           if (group.unread && group.id === stateRef.current.selectedId) {
             group.unread = false;
-            fetch(`/api/groups/${group.id}`, {
-              method: "PATCH",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ unread: false }),
-            }).catch(() => {});
+            fetch(`/api/groups/${group.id}/read`, { method: "POST" }).catch(() => {});
           }
           rawDispatch({ type: "groupPatched", group });
           break;
