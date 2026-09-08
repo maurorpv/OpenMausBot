@@ -32,6 +32,7 @@ import { packageUrlFromCommandLine, packageUrlFromDeepLink } from "./package-lin
 import { windowChromeOptions } from "./window-chrome.mjs";
 import { defaultSaveName, withSavableFile } from "./save-file.mjs";
 import { desktopViewerPermissionAllowed } from "./desktop-viewer-permissions.mjs";
+import { appPermissionAllowed } from "./app-permissions.mjs";
 import {
   ensureManagedComposioCredentials,
   managedComposioAccess,
@@ -1836,7 +1837,7 @@ ipcMain.handle("desktop:skin", (_event, skin) => {
   return true;
 });
 
-ipcMain.handle("desktop:open-external", async (_event, rawUrl) => {
+ipcMain.handle("desktop:open-external", localOnly("desktop:open-external", async (_event, rawUrl) => {
   if (typeof rawUrl !== "string") throw new Error("A web address is required");
   let url;
   try {
@@ -1847,9 +1848,12 @@ ipcMain.handle("desktop:open-external", async (_event, rawUrl) => {
   if (url.protocol !== "https:" && url.protocol !== "http:") {
     throw new Error("Only web links can be opened");
   }
+  if (url.username || url.password) {
+    throw new Error("Web links must not include user credentials");
+  }
   await shell.openExternal(url.toString());
   return true;
-});
+}));
 
 // The Box VNC viewer must be a top-level page for its token exchange. A
 // sandboxed modal BrowserWindow satisfies that requirement while keeping the
@@ -2301,22 +2305,17 @@ app.whenReady().then(async () => {
     void startDesktopCompanion({ waitForHosted: false, remember: false });
   }
   setLocalOrigin(rendererOrigin());
-  // Device permissions (microphone, camera, notifications, …) are for the
-  // local UI only; a remote server's page in this window is refused without
-  // a prompt. Client mode's loopback relay is the local UI.
-  const localPermission = (url) => {
-    try {
-      return new URL(String(url)).origin === rendererOrigin();
-    } catch {
-      return false;
-    }
-  };
-  session.defaultSession.setPermissionRequestHandler((contents, _permission, callback, details) =>
-    callback(localPermission(details?.requestingUrl ?? contents?.getURL?.() ?? "")),
-  );
-  session.defaultSession.setPermissionCheckHandler((contents, _permission, requestingOrigin) =>
-    localPermission(requestingOrigin || contents?.getURL?.() || ""),
-  );
+  // Device permissions (microphone, notifications, clipboard) are for the
+  // local UI only; privileged capabilities (camera, geolocation, USB, MIDI,
+  // serial) stay off. Client mode's loopback relay is the local UI.
+  session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
+    const requesting = details?.requestingUrl ?? contents?.getURL?.() ?? "";
+    callback(appPermissionAllowed(permission, requesting, rendererOrigin(), details));
+  });
+  session.defaultSession.setPermissionCheckHandler((contents, permission, requestingOrigin, details) => {
+    const requesting = requestingOrigin || contents?.getURL?.() || "";
+    return appPermissionAllowed(permission, requesting, rendererOrigin(), details);
+  });
   environmentsState = readEnvironments();
   createWindow();
   // Reconcile incomplete setup and resume interrupted sign-out only after the
