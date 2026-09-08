@@ -27,6 +27,8 @@ import { ComposerAttachments, pathForFile } from "./ComposerAttachments";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { ApprovalModeSelector } from "./ApprovalModeSelector";
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
+import { ComposerTokenBadge } from "./ComposerTokenBadge";
+import { getTextMetrics } from "@/lib/token-estimator";
 import {
   appendPastedText,
   handoffAttachmentImagePreview,
@@ -426,6 +428,31 @@ export function Composer({
   };
 
   const hasContent = Boolean(effectiveText.trim()) || attachments.length > 0;
+  // Cache attachment metrics so large pasted attachments are not rescanned on every keystroke
+  const attachmentMetrics = useMemo(() => {
+    if (attachments.length === 0) return null;
+    const attachmentText = composeMessage("", attachments).trim();
+    return attachmentText ? getTextMetrics(attachmentText) : null;
+  }, [attachments]);
+
+  const textMetrics = useMemo(() => {
+    const trimmed = effectiveText.trim();
+    if (!trimmed && !attachmentMetrics) {
+      return { words: 0, characters: 0, estimatedTokens: 0 };
+    }
+    if (!attachmentMetrics) {
+      return getTextMetrics(trimmed);
+    }
+    if (!trimmed) {
+      return attachmentMetrics;
+    }
+    const draftMetrics = getTextMetrics(trimmed);
+    return {
+      words: draftMetrics.words + attachmentMetrics.words,
+      characters: draftMetrics.characters + 2 + attachmentMetrics.characters,
+      estimatedTokens: draftMetrics.estimatedTokens + attachmentMetrics.estimatedTokens,
+    };
+  }, [effectiveText, attachmentMetrics]);
   const retryFailedSend = (failed: FailedComposerSend) => {
     const failedMode = failed.channelMode ?? "chat";
     if (failed.requestText.includes("<attached-image ") && !imageTargetsSupport(failed.requestText, failedMode)) {
@@ -981,33 +1008,36 @@ export function Composer({
           </button>
         )}
         {hasContent && !locked && (
-          <button
-            onClick={send}
-            disabled={attachmentPending}
-            aria-label={
-              busy && canSteer
-                  ? t("composer.send.steer")
-                  : busy
-                    ? t("composer.send.queue")
-                    : t("composer.send.message")
-            }
-            title={
-              busy && canSteer
-                  ? t("composer.send.steer")
-                  : busy
-                    ? t("composer.send.queueHint")
-                    : t("chat.send")
-            }
-            className={cn(
-              "flex size-8 shrink-0 items-center justify-center rounded-full text-white",
-              busy && !canSteer
-                  ? "bg-raised text-ink-secondary hover:bg-raised-hover"
-                  : "bg-accent hover:brightness-110",
-            )}
-          >
-            {busy && !canSteer ? <Clock size={15} /> : <ArrowUp size={17} />}
-          </button>
-          )}
+          <div className="flex items-center gap-1.5">
+            <ComposerTokenBadge metrics={textMetrics} />
+            <button
+              onClick={send}
+              disabled={attachmentPending}
+              aria-label={
+                busy && canSteer
+                    ? t("composer.send.steer")
+                    : busy
+                      ? t("composer.send.queue")
+                      : t("composer.send.message")
+              }
+              title={
+                busy && canSteer
+                    ? t("composer.send.steer")
+                    : busy
+                      ? t("composer.send.queueHint")
+                      : t("chat.send")
+              }
+              className={cn(
+                "flex size-8 shrink-0 items-center justify-center rounded-full text-white",
+                busy && !canSteer
+                    ? "bg-raised text-ink-secondary hover:bg-raised-hover"
+                    : "bg-accent hover:brightness-110",
+              )}
+            >
+              {busy && !canSteer ? <Clock size={15} /> : <ArrowUp size={17} />}
+            </button>
+          </div>
+        )}
           </div>
         </div>
         </div>
