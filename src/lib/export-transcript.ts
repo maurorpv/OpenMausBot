@@ -1,4 +1,5 @@
 import type { Message } from "@/state/store";
+import { splitTranscriptAttachments } from "./composer-attachments";
 
 export interface ExportTranscriptOptions {
   /** The conversation or room name. */
@@ -39,6 +40,22 @@ export function formatMessageTime(timestamp: number): string {
   }
 }
 
+/** Metadata is plain text, not assistant-authored Markdown or HTML. */
+function markdownLabel(value: string): string {
+  return value.replace(/[\r\n]+/g, " ").replace(/[\\`*_[\]<>]/g, "\\$&");
+}
+
+/** Use a longer delimiter when a path or tool label contains backticks. */
+function inlineCode(value: string): string {
+  let delimiter = "`";
+  for (const match of value.matchAll(/`+/g)) {
+    if (match[0].length >= delimiter.length) delimiter = "`".repeat(match[0].length + 1);
+  }
+  const text = value.replace(/[\r\n]+/g, " ");
+  const padding = /^[` ]|[` ]$/.test(text) ? " " : "";
+  return `${delimiter}${padding}${text}${padding}${delimiter}`;
+}
+
 /**
  * Cleanly format a conversation into a structured, readable Markdown document.
  */
@@ -52,7 +69,7 @@ export function formatTranscriptMarkdown(options: ExportTranscriptOptions): stri
     includeTools = true,
   } = options;
 
-  const headerTitle = isGroup ? `# Channel: ${title}` : `# Conversation with ${title}`;
+  const headerTitle = isGroup ? `# Channel: ${markdownLabel(title)}` : `# Conversation with ${markdownLabel(title)}`;
   const lines: string[] = [
     headerTitle,
     `_Exported on ${formatExportDate(exportedAt)}_`,
@@ -73,30 +90,36 @@ export function formatTranscriptMarkdown(options: ExportTranscriptOptions): stri
     const messageLines: string[] = [];
 
     // Main text content
-    if (message.text && message.text.trim()) {
-      messageLines.push(message.text.trim());
+    const userContent = isUser ? splitTranscriptAttachments(message.text ?? "", false) : null;
+    const text = userContent?.display ?? message.text;
+    if (text?.trim()) {
+      messageLines.push(text);
     }
 
-    // Attachments
+    // User attachments live in prompt-only tags. Export display names, not
+    // private storage paths or actionable image URLs.
+    for (const attachment of [...(userContent?.images ?? []), ...(userContent?.files ?? [])]) {
+      messageLines.push(`📎 _Attachment:_ ${inlineCode(attachment.name)}`);
+    }
     if (message.attachments && message.attachments.length > 0) {
       for (const att of message.attachments) {
-        messageLines.push(`📎 _Attachment:_ \`${att.path}\``);
+        messageLines.push(`📎 _Attachment:_ ${inlineCode(att.path)}`);
       }
     }
 
     // Option cards
     if (message.card) {
-      const cardLines = [`> 📋 **${message.card.title}**`];
+      const cardLines = [`> 📋 **${markdownLabel(message.card.title)}**`];
       if (message.card.subtitle) {
-        cardLines.push(`> ${message.card.subtitle}`);
+        cardLines.push(`> ${markdownLabel(message.card.subtitle)}`);
       }
       if (message.card.options && message.card.options.length > 0) {
         cardLines.push(
-          `> Options: ${message.card.options.map((opt) => `\`${opt}\``).join(", ")}`,
+          `> Options: ${message.card.options.map(inlineCode).join(", ")}`,
         );
       }
       if (message.card.answered) {
-        cardLines.push(`> Selected: **${message.card.answered}**`);
+        cardLines.push(`> Selected: **${markdownLabel(message.card.answered)}**`);
       }
       messageLines.push(cardLines.join("\n"));
     }
@@ -105,13 +128,17 @@ export function formatTranscriptMarkdown(options: ExportTranscriptOptions): stri
     if (includeTools && message.kind === "activity" && message.tool) {
       const toolLabel = message.tool.spoken || message.tool.name;
       const statusIcon = message.tool.ok === false ? "❌" : "🔧";
-      messageLines.push(`> ${statusIcon} _Used tool:_ \`${toolLabel}\``);
+      messageLines.push(`> ${statusIcon} _Used tool:_ ${inlineCode(toolLabel)}`);
+    }
+
+    if (message.kind === "screen" && message.png) {
+      messageLines.push("📷 _Screen capture (image not included in Markdown export)._");
     }
 
     // Only output if the message has something to display
     if (messageLines.length > 0) {
       lines.push("");
-      lines.push(`### **${author}** _(${time})_`);
+      lines.push(`### **${markdownLabel(author)}** _(${time})_`);
       lines.push("");
       lines.push(messageLines.join("\n\n"));
       lines.push("");
@@ -132,6 +159,7 @@ export function slugifyTranscriptFilename(title: string, date = new Date()): str
       .trim()
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
+      .slice(0, 120)
       .replace(/^-|-$/g, "") || "conversation";
 
   const year = date.getFullYear();

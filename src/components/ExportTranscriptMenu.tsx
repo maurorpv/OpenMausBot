@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, Copy, Download, FileText, Share } from "lucide-react";
+import { Check, Copy, Download, Share } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import {
@@ -36,7 +36,13 @@ export function ExportTranscriptMenu({
 }: ExportTranscriptMenuProps) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const resetTimer = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (resetTimer.current !== null) window.clearTimeout(resetTimer.current);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -73,9 +79,11 @@ export function ExportTranscriptMenu({
       isGroup,
     });
     const success = await copyTranscriptToClipboard(markdown);
+    setCopyFailed(!success);
     if (success) {
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 2_000);
+      if (resetTimer.current !== null) window.clearTimeout(resetTimer.current);
+      resetTimer.current = window.setTimeout(() => setCopied(false), 2_000);
     }
   };
 
@@ -142,6 +150,12 @@ export function ExportTranscriptMenu({
                   {copied ? "Copied to clipboard!" : "Copy as Markdown"}
                 </span>
               </button>
+
+              {copyFailed && (
+                <div role="status" className="px-3 py-2 text-[12px] text-ink-secondary">
+                  Clipboard unavailable. Download the Markdown file instead.
+                </div>
+              )}
 
               <button
                 type="button"
