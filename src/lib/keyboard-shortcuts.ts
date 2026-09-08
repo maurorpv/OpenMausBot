@@ -52,8 +52,8 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
       {
         id: "switch-bot",
         description: "Switch to previous / next bot",
-        macKeys: ["⌘", "⇧", "] / ["],
-        winKeys: ["Ctrl", "Shift", "] / ["],
+        macKeys: ["⌘", "⇧", "[ / ]"],
+        winKeys: ["Ctrl", "Shift", "[ / ]"],
       },
       {
         id: "find-conversation",
@@ -109,19 +109,25 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
       },
       {
         id: "reorder-section",
-        description: "Reorder sidebar sections",
+        description: "Reorder sidebar sections (focus a section heading)",
         macKeys: ["⌥", "↑ / ↓"],
         winKeys: ["Alt", "↑ / ↓"],
-      },
-      {
-        id: "rename-task",
-        description: "Rename task in task switcher",
-        macKeys: ["Double-click"],
-        winKeys: ["Double-click"],
       },
     ],
   },
 ];
+
+/** Help chords must not interrupt editing, composition, or another dialog. */
+export function shouldOpenKeyboardShortcuts(event: KeyboardEvent): boolean {
+  if (event.defaultPrevented || event.isComposing || event.altKey) return false;
+  const helpKey = event.key === "?" && !event.metaKey && !event.ctrlKey;
+  const helpChord = event.key === "/" && (event.metaKey || event.ctrlKey) && !event.shiftKey;
+  if (!helpKey && !helpChord) return false;
+  const target = event.target;
+  return !(target instanceof HTMLElement && (
+    target.isContentEditable || target.closest("input, textarea, select, dialog, [role=dialog]")
+  ));
+}
 
 /**
  * Detect whether the current host platform is macOS.

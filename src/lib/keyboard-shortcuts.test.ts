@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   filterShortcutGroups,
   SHORTCUT_GROUPS,
+  shouldOpenKeyboardShortcuts,
   shortcutKeysForPlatform,
 } from "./keyboard-shortcuts";
 
@@ -50,5 +51,54 @@ describe("keyboard-shortcuts", () => {
 
     const empty = filterShortcutGroups(SHORTCUT_GROUPS, "nonexistent-query-12345");
     expect(empty.length).toBe(0);
+  });
+
+  it("lists previous/next in handler order and excludes pointer gestures", () => {
+    const items = SHORTCUT_GROUPS.flatMap((group) => group.items);
+    const switchBot = items.find((item) => item.id === "switch-bot")!;
+    expect(switchBot.macKeys.at(-1)).toBe("[ / ]");
+    expect(switchBot.winKeys.at(-1)).toBe("[ / ]");
+    expect(items.some((item) => [...item.macKeys, ...item.winKeys].includes("Double-click"))).toBe(false);
+  });
+});
+
+describe("keyboard shortcut opening guard", () => {
+  class Target extends EventTarget {
+    constructor(readonly selector: string | null = null, readonly isContentEditable = false) { super(); }
+    closest(selectors: string) { return this.selector && selectors.split(", ").includes(this.selector) ? this : null; }
+  }
+  const event = (key: string, overrides: Partial<KeyboardEvent> = {}) => ({
+    key, target: new Target(), defaultPrevented: false, isComposing: false,
+    metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...overrides,
+  }) as KeyboardEvent;
+
+  beforeEach(() => vi.stubGlobal("HTMLElement", Target));
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("accepts help keys outside editing controls", () => {
+    expect(shouldOpenKeyboardShortcuts(event("?", { shiftKey: true }))).toBe(true);
+    expect(shouldOpenKeyboardShortcuts(event("/", { metaKey: true }))).toBe(true);
+    expect(shouldOpenKeyboardShortcuts(event("/", { ctrlKey: true }))).toBe(true);
+    expect(shouldOpenKeyboardShortcuts(event("/"))).toBe(false);
+    expect(shouldOpenKeyboardShortcuts(event("k", { metaKey: true }))).toBe(false);
+  });
+
+  it.each(["input", "textarea", "select", "dialog", "[role=dialog]"])("does not open from %s", (selector) => {
+    const target = new Target(selector);
+    expect(shouldOpenKeyboardShortcuts(event("?", { target }))).toBe(false);
+    expect(shouldOpenKeyboardShortcuts(event("/", { target, metaKey: true }))).toBe(false);
+    expect(shouldOpenKeyboardShortcuts(event("/", { target, ctrlKey: true }))).toBe(false);
+  });
+
+  it("respects editable ancestors, composition, handled events, and extra modifiers", () => {
+    for (const overrides of [
+      { target: new Target(null, true) }, { isComposing: true },
+      { defaultPrevented: true }, { altKey: true },
+    ]) {
+      expect(shouldOpenKeyboardShortcuts(event("?", overrides))).toBe(false);
+      expect(shouldOpenKeyboardShortcuts(event("/", { metaKey: true, ...overrides }))).toBe(false);
+    }
+    expect(shouldOpenKeyboardShortcuts(event("?", { ctrlKey: true }))).toBe(false);
+    expect(shouldOpenKeyboardShortcuts(event("/", { metaKey: true, shiftKey: true }))).toBe(false);
   });
 });

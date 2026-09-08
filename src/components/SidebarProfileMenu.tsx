@@ -8,7 +8,7 @@
 //
 // The update entry is the one item that reports progress in place, so it
 // keeps the menu open and re-labels itself as it works.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowDownToLine,
   Check,
@@ -191,6 +191,7 @@ export function SidebarProfileMenu() {
   const phone = useSidebarPhoneStatus();
   const update = useUpdateItem();
   const [aboutOpen, setAboutOpen] = useState(false);
+  const triggerRef = useRef<HTMLSpanElement>(null);
 
   const profile = state.config?.profile;
   const name = profileLabel(profile);
@@ -216,7 +217,11 @@ export function SidebarProfileMenu() {
       key: "shortcuts",
       label: "Keyboard shortcuts",
       icon: <Keyboard size={18} />,
-      onSelect: () => dispatch({ type: "toggleShortcuts", open: true }),
+      onSelect: () => {
+        // The menu item unmounts; let the dialog restore the profile button.
+        triggerRef.current?.closest("button")?.focus();
+        dispatch({ type: "toggleShortcuts", open: true });
+      },
     },
     ...(update ? [update.item] : []),
     {
@@ -247,6 +252,7 @@ export function SidebarProfileMenu() {
         ariaLabel={name}
         renderTrigger={({ open }) => (
           <span
+            ref={triggerRef}
             className={cn(
               "flex min-h-10 w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors",
               open ? "bg-raised" : "hover:bg-raised/50",

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Keyboard, Search, X } from "lucide-react";
 
 import {
@@ -8,7 +8,6 @@ import {
   shortcutKeysForPlatform,
   type ShortcutItem,
 } from "@/lib/keyboard-shortcuts";
-import { cn } from "@/lib/cn";
 
 /** Props for the KeyboardShortcutsModal component. */
 export interface KeyboardShortcutsModalProps {
@@ -47,38 +46,35 @@ function ShortcutRow({ item, isMac }: { item: ShortcutItem; isMac: boolean }) {
  */
 export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModalProps) {
   const [query, setQuery] = useState("");
+  const dialogRef = useRef<HTMLDialogElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const isMac = isMacPlatform();
 
-  useEffect(() => {
-    if (!open) return;
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current;
+    if (!open || !dialog) return;
     setQuery("");
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-      }
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open, onClose]);
+    dialog.showModal();
+    inputRef.current?.focus();
+    // Close before unmount so the browser restores focus to the opener.
+    return () => dialog.close();
+  }, [open]);
 
   if (!open) return null;
 
   const groups = filterShortcutGroups(SHORTCUT_GROUPS, query, isMac);
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs animate-fade-in"
+    <dialog
+      ref={dialogRef}
+      aria-labelledby="shortcuts-dialog-title"
+      className="m-auto w-[min(500px,calc(100%-32px))] max-h-[85vh] overflow-hidden rounded-2xl border border-hairline/50 bg-panel p-0 text-ink shadow-2xl backdrop:bg-black/60 backdrop:backdrop-blur-xs"
+      onCancel={(event) => { event.preventDefault(); onClose(); }}
+      onKeyDown={(event) => event.stopPropagation()}
       onMouseDown={(event) => event.target === event.currentTarget && onClose()}
     >
       <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="shortcuts-dialog-title"
-        className="flex max-h-[85vh] w-full max-w-[500px] flex-col overflow-hidden rounded-2xl border border-hairline/50 bg-panel shadow-2xl"
+        className="flex max-h-[85vh] flex-col"
       >
         {/* Modal Header */}
         <div className="flex items-center justify-between border-b border-hairline/40 px-5 py-4">
@@ -145,7 +141,7 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
         {/* Modal Footer */}
         <div className="flex items-center justify-between border-t border-hairline/40 bg-card/30 px-5 py-2.5 text-[11.5px] text-ink-secondary">
           <span>
-            Press <kbd className="rounded bg-control px-1 py-0.5 font-mono text-[10.5px]">?</kbd> from anywhere to open
+            Press <kbd className="rounded bg-control px-1 py-0.5 font-mono text-[10.5px]">?</kbd> when not typing to open
           </span>
           <button
             type="button"
@@ -156,6 +152,6 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
           </button>
         </div>
       </div>
-    </div>
+    </dialog>
   );
 }

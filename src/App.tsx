@@ -24,6 +24,7 @@ import { SkillRecorderPage } from "@/components/SkillRecorderPage";
 import { TeamMapPage } from "@/components/TeamMapPage";
 import { skillRecorderEnabled } from "@/lib/feature-flags";
 import { setLocale } from "@/lib/i18n";
+import { shouldOpenKeyboardShortcuts } from "@/lib/keyboard-shortcuts";
 
 function Shell() {
   const { state, dispatch } = useStore();
@@ -70,18 +71,8 @@ function Shell() {
   // Kept deliberately small; every panel already closes on Esc.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // ? shortcut when not typing in an editable field
-      if (
-        e.key === "?" &&
-        !e.metaKey &&
-        !e.ctrlKey &&
-        !e.altKey &&
-        !(
-          e.target instanceof HTMLInputElement ||
-          e.target instanceof HTMLTextAreaElement ||
-          (e.target instanceof HTMLElement && e.target.isContentEditable)
-        )
-      ) {
+      if (e.defaultPrevented || e.isComposing || state.shortcutsOpen) return;
+      if (shouldOpenKeyboardShortcuts(e)) {
         e.preventDefault();
         dispatch({ type: "toggleShortcuts", open: true });
         return;
@@ -90,10 +81,7 @@ function Shell() {
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
       const bots = state.bots.filter((b) => !b.hidden);
-      if (e.key === "/" && !e.shiftKey) {
-        e.preventDefault();
-        dispatch({ type: "toggleShortcuts", open: true });
-      } else if (e.key === "n" && !e.shiftKey) {
+      if (e.key === "n" && !e.shiftKey) {
         e.preventDefault();
         dispatch({ type: "newBot" });
       } else if (/^[1-9]$/.test(e.key)) {
@@ -113,7 +101,7 @@ function Shell() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [state.bots, state.selectedId, dispatch]);
+  }, [state.bots, state.selectedId, state.shortcutsOpen, dispatch]);
 
   useEffect(() => {
     window.ogb?.setUnreadCount?.(unreadCount);
