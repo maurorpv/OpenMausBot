@@ -14,6 +14,7 @@ import {
   Check,
   Info,
   HelpCircle,
+  Keyboard,
   Loader2,
   RefreshCw,
   Settings as SettingsIcon,
@@ -195,6 +196,12 @@ export function SidebarProfileMenu() {
       label: "Settings",
       icon: <SettingsIcon size={18} />,
       onSelect: () => dispatch({ type: "toggleAppSettings" }),
+    },
+    {
+      key: "shortcuts",
+      label: "Keyboard shortcuts",
+      icon: <Keyboard size={18} />,
+      onSelect: () => dispatch({ type: "toggleShortcuts", open: true }),
     },
     ...(update ? [update.item] : []),
     {
