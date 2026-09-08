@@ -24,6 +24,7 @@ import { ChatMarkdown } from "./ChatMarkdown";
 import { Composer } from "./Composer";
 import { ChatFindBar } from "./ChatFindBar";
 import { GroupTaskPicker } from "./TaskPicker";
+import { ExportTranscriptMenu } from "./ExportTranscriptMenu";
 import { ReplyQuote } from "./ReplyQuote";
 import { ConnectorCard } from "./ConnectorCard";
 import { SecretRequestCard } from "./SecretRequestCard";
@@ -1085,6 +1086,11 @@ export function GroupView({ group }: { group: Group }) {
           >
             <Search size={18} />
           </button>
+          <ExportTranscriptMenu
+            title={group.name}
+            messages={group.messages}
+            isGroup
+          />
           <GroupCallButton group={group} members={members} />
           {!setupPending && !group.dm && <RoomWorkingFolderChip group={group} onToggle={() => setFolderOpen((open) => !open)} />}
           {!setupPending && !group.dm && <DefaultResponderSelect group={group} members={members} />}

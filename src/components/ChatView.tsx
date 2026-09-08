@@ -55,6 +55,7 @@ import { AttachedFileChips, AttachedImageGallery } from "./AttachmentPreview";
 import { ModelPicker } from "./ModelPicker";
 import { RenameTitle } from "./RenameTitle";
 import { TaskPicker } from "./TaskPicker";
+import { ExportTranscriptMenu } from "./ExportTranscriptMenu";
 
 import { SpeakButton } from "./SpeakButton";
 import { CallButton, CallOverlay } from "./CallView";
@@ -1146,6 +1147,11 @@ export function ChatView({ bot }: { bot: Bot }) {
           >
             <Search size={18} />
           </button>
+          <ExportTranscriptMenu
+            title={bot.name}
+            messages={messages}
+            botName={bot.name}
+          />
           {bot.busy && (
             <button
               onClick={() => dispatch({ type: "interrupt", botId: bot.id })}
