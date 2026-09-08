@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ChatMarkdown,
+  CodeBlock,
   chatUrlTransform,
   markdownImageName,
   markdownImageOpenUrl,
@@ -126,3 +127,47 @@ describe("ChatMarkdown attachments", () => {
     expect(html).not.toContain("src=\"/workspace/output.png\"");
   });
 });
+
+describe("ChatMarkdown code blocks", () => {
+  it("renders normalized language badge, line count, and accessible buttons for fenced code", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "```ts\nconst x: number = 42;\nconsole.log(x);\n```",
+    }));
+
+    expect(html).toContain("TypeScript");
+    expect(html).toContain("2 lines");
+    expect(html).toContain('aria-label="Copy code to clipboard"');
+    expect(html).toContain('aria-label="Wrap long lines"');
+    expect(html).toContain('title="Copy code"');
+    expect(html).toContain('type="button"');
+  });
+
+  it("renders singular line count and handles unknown or omitted language identifiers", () => {
+    const htmlUnknown = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "```zig\nconst std = @import(\"std\");\n```",
+    }));
+    expect(htmlUnknown).toContain("Zig");
+    expect(htmlUnknown).toContain("1 line");
+
+    const htmlOmitted = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "```\necho plain\n```",
+    }));
+    expect(htmlOmitted).toContain("Code");
+    expect(htmlOmitted).toContain("1 line");
+  });
+
+  it("renders CodeBlock component directly with proper structure and accessibility", () => {
+    const html = renderToStaticMarkup(createElement(CodeBlock, {
+      code: "line1\nline2\nline3\n",
+      lang: "py",
+      streaming: false,
+    }));
+
+    expect(html).toContain("Python");
+    expect(html).toContain("3 lines");
+    expect(html).toContain('aria-label="Copy code to clipboard"');
+    expect(html).toContain('aria-label="Wrap long lines"');
+    expect(html).toContain("line1\nline2\nline3");
+  });
+});
+
