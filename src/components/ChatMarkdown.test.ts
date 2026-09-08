@@ -129,6 +129,21 @@ describe("ChatMarkdown attachments", () => {
 });
 
 describe("ChatMarkdown code blocks", () => {
+  it.each([["c++", "C++"], ["c#", "C#"]])("preserves punctuation in the %s fence label", (lang, label) => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: `\`\`\`${lang}\nint value = 1;\n\`\`\``,
+    }));
+    expect(html).toContain(`>${label}</span>`);
+  });
+
+  it("counts deliberate blank lines before the closing fence", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "```ts\nconst x = 1;\n\n```",
+    }));
+    expect(html).toContain("2 lines");
+    expect(html).toContain("const x = 1;\n</pre>");
+  });
+
   it("renders normalized language badge, line count, and accessible buttons for fenced code", () => {
     const html = renderToStaticMarkup(createElement(ChatMarkdown, {
       text: "```ts\nconst x: number = 42;\nconsole.log(x);\n```",
@@ -164,10 +179,9 @@ describe("ChatMarkdown code blocks", () => {
     }));
 
     expect(html).toContain("Python");
-    expect(html).toContain("3 lines");
+    expect(html).toContain("4 lines");
     expect(html).toContain('aria-label="Copy code to clipboard"');
     expect(html).toContain('aria-label="Wrap long lines"');
     expect(html).toContain("line1\nline2\nline3");
   });
 });
-

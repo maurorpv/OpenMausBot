@@ -112,8 +112,8 @@ export function getLanguageDisplayName(lang?: string | null): string {
 }
 
 /**
- * Accurately counts the number of lines in a code snippet.
- * Handles CRLF, LF, and strips single trailing end-of-file newlines.
+ * Counts rendered lines, including deliberate trailing blank lines.
+ * ChatMarkdown already removes the newline added by the Markdown renderer.
  *
  * @param code - Raw source code string.
  * @returns Total number of lines (0 if empty, >= 1 otherwise).
@@ -121,7 +121,7 @@ export function getLanguageDisplayName(lang?: string | null): string {
  * @example
  * ```ts
  * countLines("console.log(1);"); // 1
- * countLines("a\nb\n");          // 2
+ * countLines("a\nb\n");          // 3
  * countLines("");                // 0
  * ```
  */
@@ -130,14 +130,7 @@ export function countLines(code?: string | null): number {
     return 0;
   }
 
-  // Strip a single trailing newline so that standard editor EOF newlines
-  // do not inflate the line count.
-  const content = code.replace(/(?:\r\n|\r|\n)$/, "");
-  if (!content) {
-    return code.length > 0 ? 1 : 0;
-  }
-
-  return content.split(/\r\n|\r|\n/).length;
+  return code.split(/\r\n|\r|\n/).length;
 }
 
 /**

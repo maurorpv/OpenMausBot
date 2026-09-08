@@ -55,19 +55,26 @@ describe("countLines", () => {
 
   it("counts single line snippets accurately", () => {
     expect(countLines("const x = 10;")).toBe(1);
-    expect(countLines("const x = 10;\n")).toBe(1);
-    expect(countLines("const x = 10;\r\n")).toBe(1);
+    expect(countLines(" ")).toBe(1);
+  });
+
+  it("keeps deliberate trailing blank lines after Markdown's newline is removed", () => {
+    expect(countLines("const x = 10;\n")).toBe(2);
+    expect(countLines("const x = 10;\r\n")).toBe(2);
+    expect(countLines("\n")).toBe(2);
+    expect(countLines("\n\n")).toBe(3);
   });
 
   it("counts multi-line snippets accurately", () => {
     expect(countLines("line 1\nline 2")).toBe(2);
-    expect(countLines("line 1\nline 2\n")).toBe(2);
-    expect(countLines("line 1\nline 2\nline 3\n")).toBe(3);
+    expect(countLines("line 1\nline 2\n")).toBe(3);
+    expect(countLines("line 1\nline 2\nline 3\n")).toBe(4);
   });
 
   it("supports Windows CRLF newlines", () => {
     expect(countLines("line 1\r\nline 2\r\nline 3")).toBe(3);
-    expect(countLines("line 1\r\nline 2\r\nline 3\r\n")).toBe(3);
+    expect(countLines("line 1\r\nline 2\r\nline 3\r\n")).toBe(4);
+    expect(countLines("line 1\rline 2\rline 3")).toBe(3);
   });
 });
 
