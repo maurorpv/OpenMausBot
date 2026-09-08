@@ -129,6 +129,23 @@ describe("ChatMarkdown attachments", () => {
 });
 
 describe("ChatMarkdown code blocks", () => {
+  it.each([
+    ["tsx", "TypeScript (TSX)"],
+    ["averylongunknownlanguageidentifier", "Averylongunknownlanguageidentifier"],
+  ])("lets the %s badge shrink without wrapping the count or controls", (lang, label) => {
+    const html = renderToStaticMarkup(createElement(CodeBlock, {
+      code: "first\nsecond", lang, streaming: false,
+    }));
+    const badge = html.match(/<span[^>]*title="[^"]*"[^>]*>/)?.[0];
+    expect(badge).toContain(`title="${label}"`);
+    expect(badge).toContain("min-w-0 truncate");
+    expect(html).toContain("flex min-w-0 flex-1 items-center gap-2");
+    expect(html).toMatch(/<span class="[^"]*shrink-0 whitespace-nowrap[^"]*">2 lines<\/span>/);
+    expect(html).toContain("flex shrink-0 items-center gap-1 whitespace-nowrap");
+    expect(html).toContain('aria-label="Copy code to clipboard"');
+    expect(html).toContain('aria-label="Wrap long lines"');
+  });
+
   it.each([["c++", "C++"], ["c#", "C#"]])("preserves punctuation in the %s fence label", (lang, label) => {
     const html = renderToStaticMarkup(createElement(ChatMarkdown, {
       text: `\`\`\`${lang}\nint value = 1;\n\`\`\``,

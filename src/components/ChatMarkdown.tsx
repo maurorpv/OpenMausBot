@@ -195,18 +195,18 @@ export function CodeBlock({ code, lang, streaming }: CodeBlockProps) {
 
   return (
     <div className="my-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset">
-      <div className="flex items-center justify-between border-b border-hairline/30 bg-raised/30 px-3 py-1.5 text-xs">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="inline-flex items-center rounded border border-hairline/40 bg-raised px-1.5 py-0.5 text-[11px] font-medium tracking-wide text-ink select-none">
+      <div className="flex items-center justify-between gap-2 border-b border-hairline/30 bg-raised/30 px-3 py-1.5 text-xs">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <span title={displayLanguage} className="min-w-0 truncate rounded border border-hairline/40 bg-raised px-1.5 py-0.5 text-[11px] font-medium tracking-wide text-ink select-none">
             {displayLanguage}
           </span>
           {lineCount > 0 && (
-            <span className="text-[11px] text-ink-secondary select-none">
+            <span className="shrink-0 whitespace-nowrap text-[11px] text-ink-secondary select-none">
               {formatLineCount(lineCount)}
             </span>
           )}
         </div>
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex shrink-0 items-center gap-1 whitespace-nowrap">
           <button
             type="button"
             onClick={() => setWrapLines((w) => !w)}
