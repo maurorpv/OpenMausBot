@@ -4,7 +4,10 @@
 // scripted session. Failure modes are toggled by env var, mirroring how
 // the real thing misbehaves:
 //
-//   FAKE_CLAUDE_MODE   happy (default) | exit-early | hang | malformed
+//   FAKE_CLAUDE_MODE   happy (default) | exit-early | hang | malformed |
+//                      dead-session (fails only when --resume is passed)
+//                      | resume-dies-after-init (a --resume launch emits
+//                        init, then exits without result or output)
 //                      | stream (partial-message text deltas before the
 //                        whole-message frame, plus subagent noise to drop)
 //                      | not-logged-in (the frames a signed-out CLI really
@@ -25,7 +28,7 @@
 //                      inherited-api-key — what `auth status` reports
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_CLAUDE_MODE ?? "happy";
 const scriptedReplies = (() => {
@@ -65,7 +68,9 @@ const out = (obj: unknown) => process.stdout.write(JSON.stringify(obj) + "\n");
 
 // Snapshot probes: both answer on argv alone and exit without reading stdin.
 if (argv[0] === "--version") {
-  process.stdout.write("2.1.232 (Claude Code)\n");
+  // FAKE_CLAUDE_VERSION lets a test stand in for an older CLI: the driver
+  // withholds flags that version predates (CLAUDE_FLAG_FLOORS).
+  process.stdout.write(`${process.env.FAKE_CLAUDE_VERSION ?? "2.1.232"} (Claude Code)\n`);
   process.exit(0);
 }
 
@@ -158,6 +163,10 @@ const finishIfDone = () => {
 const playTurn = (prompt: JsonValue) => {
   turnRunning = true;
   steered = [];
+  // Every prompt this process receives, one JSON object per line. FAKE_CLAUDE_DUMP
+  // records only the first, which cannot show what a REUSED session was sent on
+  // its second and later turns.
+  if (process.env.FAKE_CLAUDE_PROMPTS) appendFileSync(process.env.FAKE_CLAUDE_PROMPTS, `${JSON.stringify(prompt)}\n`);
   if (!dumped && process.env.FAKE_CLAUDE_DUMP) {
     dumped = true;
     const configPath = argAfter("--mcp-config");
@@ -182,6 +191,14 @@ const playTurn = (prompt: JsonValue) => {
       process.env.FAKE_CLAUDE_DUMP,
       JSON.stringify({ pid: process.pid, argv, env: process.env, prompt, systemPrompt, mcpConfig }, null, 2),
     );
+  }
+
+  // A resumed session the CLI no longer has: it exits before any `init`
+  // frame, so the prompt on stdin is never read. A FRESH launch (--session-id)
+  // works normally, which is what makes recovery observable.
+  if (mode === "dead-session" && argv.includes("--resume")) {
+    process.stderr.write(`fake-claude: No conversation found with session ID: ${argAfter("--resume")}\n`);
+    process.exit(1);
   }
 
   if (mode === "exit-early") {
@@ -214,6 +231,14 @@ const playTurn = (prompt: JsonValue) => {
 
   // the real CLI re-announces init on every turn of a live process
   out({ type: "system", subtype: "init", session_id: sessionId, model });
+
+  // The CLI accepted the resumed session — it read the prompt — and then
+  // died with nothing to show. The prompt may already have run tools, so
+  // the driver must NOT send it again.
+  if (mode === "resume-dies-after-init" && argv.includes("--resume")) {
+    process.stderr.write("fake-claude: simulated crash after accepting the resumed session\n");
+    process.exit(3);
+  }
 
   if (mode === "hang") {
     // stay alive until killed — lets tests exercise interrupt + the
