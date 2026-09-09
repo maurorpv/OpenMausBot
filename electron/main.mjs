@@ -25,7 +25,7 @@ import { packageUrlFromCommandLine, packageUrlFromDeepLink } from "./package-lin
 import { windowChromeOptions } from "./window-chrome.mjs";
 import { defaultSaveName, withSavableFile } from "./save-file.mjs";
 import { desktopViewerPermissionAllowed } from "./desktop-viewer-permissions.mjs";
-import { appPermissionAllowed } from "./app-permissions.mjs";
+import { appPermissionAllowed, externalWebUrl } from "./app-permissions.mjs";
 import {
   ensureManagedComposioCredentials,
   managedComposioAccess,
@@ -1533,7 +1533,13 @@ function createWindow() {
   });
 
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    try {
+      void shell.openExternal(externalWebUrl(url)).catch(() => {
+        console.warn("The external web link could not be opened");
+      });
+    } catch {
+      // Reject non-web links and embedded credentials without opening them.
+    }
     return { action: "deny" };
   });
   // The window shows Local or a saved server, nothing else: a page cannot
@@ -1826,20 +1832,7 @@ ipcMain.handle("desktop:skin", (_event, skin) => {
 });
 
 ipcMain.handle("desktop:open-external", localOnly("desktop:open-external", async (_event, rawUrl) => {
-  if (typeof rawUrl !== "string") throw new Error("A web address is required");
-  let url;
-  try {
-    url = new URL(rawUrl);
-  } catch {
-    throw new Error("That web address is invalid");
-  }
-  if (url.protocol !== "https:" && url.protocol !== "http:") {
-    throw new Error("Only web links can be opened");
-  }
-  if (url.username || url.password) {
-    throw new Error("Web links must not include user credentials");
-  }
-  await shell.openExternal(url.toString());
+  await shell.openExternal(externalWebUrl(rawUrl));
   return true;
 }));
 

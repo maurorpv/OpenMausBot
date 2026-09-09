@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { appPermissionAllowed } from "./app-permissions.mjs";
+import { readFileSync } from "node:fs";
+import { appPermissionAllowed, externalWebUrl } from "./app-permissions.mjs";
 
 const LOCAL_ORIGIN = "http://127.0.0.1:5199";
 const LOCAL_PAGE = "http://127.0.0.1:5199/chat?botId=bot-1";
@@ -56,6 +57,32 @@ test("keeps every privileged capability off even for the local renderer page", (
     assert.equal(appPermissionAllowed(permission, LOCAL_PAGE, LOCAL_ORIGIN), false, permission);
   }
   assert.equal(appPermissionAllowed(undefined, LOCAL_PAGE, LOCAL_ORIGIN), false);
+});
+
+test("rejects mixed, unknown, and conflicting media details", () => {
+  for (const details of [
+    { mediaTypes: ["audio", "unknown"] }, { mediaTypes: ["unknown"] },
+    { mediaType: "audio", mediaTypes: ["video"] },
+    { mediaType: "unknown", mediaTypes: [] }, { mediaTypes: "audio" }, null,
+  ]) assert.equal(appPermissionAllowed("media", LOCAL_PAGE, LOCAL_ORIGIN, details), false);
+});
+
+test("web links reject embedded credentials and non-web schemes", () => {
+  assert.equal(externalWebUrl("https://example.com/help?q=hello#more"), "https://example.com/help?q=hello#more");
+  assert.equal(externalWebUrl("http://127.0.0.1:8799"), "http://127.0.0.1:8799/");
+  for (const url of ["https://user:pass@example.com", "http://user@example.com", "https://:pass@example.com"])
+    assert.throws(() => externalWebUrl(url), /credentials/);
+  for (const url of ["file:///tmp/test", "javascript:alert(1)", "data:text/html,test", "mailto:test@example.com"])
+    assert.throws(() => externalWebUrl(url), /Only web/);
+  for (const url of [null, 123, "not a url"])
+    assert.throws(() => externalWebUrl(url), /web address/);
+});
+
+test("both external-link entry points use the policy and IPC retains the local-origin gate", () => {
+  const main = readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
+  assert.match(main, /ipcMain\.handle\("desktop:open-external", localOnly\("desktop:open-external"/);
+  assert.match(main, /shell\.openExternal\(externalWebUrl\(rawUrl\)\)/);
+  assert.match(main, /shell\.openExternal\(externalWebUrl\(url\)\)/);
 });
 
 test("fails closed on unparsable or opaque origins", () => {

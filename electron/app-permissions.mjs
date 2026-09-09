@@ -1,9 +1,10 @@
 // Permission policy for the main application window. The local UI needs a
 // small set of capabilities to function: audio media (microphone for voice
-// input and skill demonstrations), notifications, and clipboard access.
+// input), notifications, and clipboard access. Screen preview has its own
+// one-shot, user-gesture-bound display-media guard in main.mjs.
 //
 // Privileged capabilities — camera/video, geolocation, USB, HID, serial,
-// MIDI, screen capture, window management, local fonts — stay off: the app
+// MIDI, unguarded screen capture, window management, local fonts — stay off: the app
 // does not use them, and granting them unconditionally to the renderer leaves
 // host sensors and devices exposed if an untrusted payload ever executes.
 // The allow-list also applies only to the verified renderer origin; any
@@ -19,7 +20,7 @@ const ALLOWED_APP_PERMISSIONS = new Set([
 // Opaque origins (data:, about:blank, javascript:) serialise as the string
 // "null"; never let two of them match each other.
 function webOrigin(value) {
-  if (Object.prototype.toString.call(value) !== "[object String]") return null;
+  if (typeof value !== "string") return null;
   try {
     const origin = new URL(value).origin;
     return origin === "null" ? null : origin;
@@ -47,17 +48,27 @@ export function appPermissionAllowed(permission, requestingUrlOrOrigin, renderer
   // before selecting display media. Allowing this preserves the guarded displayMediaGuard
   // without granting webcam access.
   if (permission === "media") {
-    if (details?.mediaType === "video" || details?.mediaType === "unknown") return false;
-    if (details?.mediaType === "audio") return true;
-
-    if (Array.isArray(details?.mediaTypes)) {
-      if (details.mediaTypes.includes("video")) return false;
+    if (details?.mediaType !== undefined && details.mediaType !== "audio") return false;
+    if (details?.mediaTypes !== undefined) {
       // Empty mediaTypes is Electron getDisplayMedia routing; ["audio"] is microphone capture.
-      return details.mediaTypes.length === 0 || details.mediaTypes.includes("audio");
+      return Array.isArray(details.mediaTypes) && details.mediaTypes.every((type) => type === "audio");
     }
-
-    return false;
+    return details?.mediaType === "audio";
   }
 
   return ALLOWED_APP_PERMISSIONS.has(permission);
+}
+
+// Both explicit IPC links and window.open must use the same web-only policy.
+export function externalWebUrl(rawUrl) {
+  if (typeof rawUrl !== "string") throw new Error("A web address is required");
+  let url;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new Error("That web address is invalid");
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("Only web links can be opened");
+  if (url.username || url.password) throw new Error("Web links must not include user credentials");
+  return url.toString();
 }
