@@ -1,5 +1,6 @@
 import { Code, Eye } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { t } from "@/lib/i18n";
 
 /** Props for the {@link RawToggleAction} component. */
 export interface RawToggleActionProps {
@@ -11,19 +12,16 @@ export interface RawToggleActionProps {
   className?: string;
 }
 
-/**
- * Action button that toggles between rich rendered markdown and raw source view.
- *
- * @param props - Component props containing active state and onToggle handler.
- * @returns Rendered toggle button element.
- */
+/** Switch one bot message between rendered markdown and its original source. */
 export function RawToggleAction({ active, onToggle, className }: RawToggleActionProps) {
+  const label = t(active ? "chat.showRenderedMarkdown" : "chat.showRawMarkdown");
   return (
     <button
       type="button"
       onClick={onToggle}
-      aria-label={active ? "Show rendered markdown" : "Show raw markdown"}
-      title={active ? "Show rendered markdown" : "Show raw markdown"}
+      aria-label={label}
+      aria-pressed={active}
+      title={label}
       className={cn(
         "rounded-md p-1.5 transition-opacity focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100",
         active
@@ -45,17 +43,12 @@ export interface RawMarkdownViewProps {
   className?: string;
 }
 
-/**
- * Displays raw unrendered markdown in a formatted monospace container
- * with vertical and horizontal scrolling, word wrapping, and copyable text.
- *
- * @param props - Component props containing raw text.
- * @returns Rendered preformatted text element.
- */
+/** React escapes the source; long messages remain selectable and keyboard-scrollable. */
 export function RawMarkdownView({ text, className }: RawMarkdownViewProps) {
   return (
     <pre
       data-testid="raw-markdown-view"
+      tabIndex={0}
       className={cn(
         "max-h-[36rem] overflow-auto whitespace-pre-wrap break-words rounded-lg border border-hairline/30 bg-inset/50 p-3 font-mono text-[12.5px] leading-relaxed text-ink select-text",
         className,
