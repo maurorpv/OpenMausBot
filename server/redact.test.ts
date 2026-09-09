@@ -150,6 +150,9 @@ describe("redactSecretsInText", () => {
       [`aws ${"AKIA" + "IOSFODNN7EXAMPLE"} and more`, /IOSFODNN7EXAMPLE/],
       [`google ${"AIza" + "SyA-"}${alpha.slice(0, 32)}`, /AIza/],
       [`npm ${"npm" + "_"}${alpha}`, /npm_[a-z]/],
+      [`xai ${"xai-"}${alpha}`, /xai-/],
+      [`groq ${"gsk_"}${alpha}`, /gsk_/],
+      [`huggingface ${"hf_"}${alpha}`, /hf_/],
     ];
     for (const [input, leak] of cases) {
       const out = redactSecretsInText(input);
